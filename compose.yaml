@@ -22,6 +22,14 @@ services:
     restart: unless-stopped
     ports:
       - "127.0.0.1:23149:8000"
+    environment:
+      # Auto-index every project the MCP server sees on first contact.
+      # Persisted in the cache volume after first start; remove the env
+      # var or set to "false" to stop reapplying.
+      AUTO_INDEX: "true"
+      # Cap on files per project (upstream default 50000). Bump for large
+      # monorepos.
+      #AUTO_INDEX_LIMIT: "200000"
 
   # Ad-hoc graph UI service. Runs the binary with --ui=true on 9749.
   # Stop the main service first — graph DB doesn't tolerate concurrent writers.

@@ -19,6 +19,11 @@ Image=ghcr.io/trick77/mcp-codebase-memory-podman:latest
 AutoUpdate=registry
 PublishPort=127.0.0.1:23149:8000
 
+# Auto-index every project the MCP server sees on first contact.
+# Applied by entrypoint.sh on each start; persisted in the cache volume.
+Environment=AUTO_INDEX=true
+#Environment=AUTO_INDEX_LIMIT=200000
+
 # Source tree: read-only at the same path so file paths in graph results match
 # host paths. Indexing only reads, never writes.
 Volume=__BASE_DIR__:__BASE_DIR__:ro,Z

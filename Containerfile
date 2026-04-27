@@ -71,6 +71,8 @@ RUN python3 -m venv /opt/mcp-proxy && \
     ln -s /opt/mcp-proxy/bin/mcp-proxy /usr/local/bin/mcp-proxy
 
 COPY --from=builder /src/build/c/codebase-memory-mcp /usr/local/bin/codebase-memory-mcp
+COPY entrypoint.sh /usr/local/bin/entrypoint.sh
+RUN chmod +x /usr/local/bin/entrypoint.sh
 
 ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
     SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt \
@@ -79,14 +81,9 @@ ENV REQUESTS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt \
 
 EXPOSE 8000
 
-# mcp-proxy spawns one `codebase-memory-mcp` child per MCP client session
-# (NOT per request — sessions are tracked, so OpenCode + Cursor + Claude Code
-# concurrently = 3 long-lived child processes, not N-per-tool-call).
-#
-# UI (--ui=true) is intentionally NOT enabled here. The graph UI binds port
-# 9749 inside the child process; with multiple concurrent sessions, only the
-# first child would win the bind. For ad-hoc UI exploration, run the image
-# directly: `podman run --rm -it -p 127.0.0.1:9749:9749 codebase-memory-mcp --ui=true`.
-ENTRYPOINT ["mcp-proxy", "--host", "0.0.0.0", "--port", "8000", \
-            "--pass-environment", "--", \
-            "codebase-memory-mcp"]
+# Wrapper applies AUTO_INDEX / AUTO_INDEX_LIMIT to the persisted config DB
+# (in /root/.cache/codebase-memory-mcp/_config.db, mounted as a named
+# volume), then exec's mcp-proxy. mcp-proxy spawns one codebase-memory-mcp
+# child per MCP client session — UI is not started here because the graph
+# UI binds port 9749 per-process and multiple sessions would collide.
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]

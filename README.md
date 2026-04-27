@@ -4,8 +4,6 @@ Hardened podman wrapper around [`DeusData/codebase-memory-mcp`](https://github.c
 
 Upstream speaks stdio only; we bundle [`sparfenyuk/mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy) to expose streamable-http so the container can run as a long-lived Quadlet service. Upstream also ships a static binary that needs a newer glibc than RHEL 9 provides — we build from source inside Debian 13 in a multi-stage image so the final runtime contains only the compiled binary, mcp-proxy, and a Python venv.
 
-**Pre-built image**: `ghcr.io/trick77/mcp-codebase-memory-podman:latest` (built from CI on every push to `master`, no corp CAs baked in). Most users should just pull this. Behind a TLS-intercepting proxy, build from source via [Building from source](#building-from-source) instead.
-
 ## Using it (once installed)
 
 You don't call any tool by name — OpenCode (or any MCP client) auto-discovers them on connect via `tools/list` and routes the agent there when your prompt asks about code structure, dependencies, or call chains. Concretely: just describe what you want to know about the codebase.

@@ -1,0 +1,38 @@
+version: 2
+
+updates:
+  # Bump pinned action versions in .github/workflows/*.yaml.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions-minor-patch:
+        update-types: [minor, patch]
+
+  # Bump base images in the Containerfile (debian:13-slim).
+  # Note: this does NOT track upstream DeusData/codebase-memory-mcp git tags
+  # — that's handled by .github/workflows/upstream-watch.yaml, which opens a
+  # PR bumping UPSTREAM_VERSION in build.yaml. Dependabot has no ecosystem
+  # for "arbitrary git tag in a Containerfile ARG".
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: Europe/Zurich
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: deps
+      include: scope
+    groups:
+      docker-minor-patch:
+        update-types: [minor, patch]

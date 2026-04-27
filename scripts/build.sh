@@ -8,6 +8,7 @@ IMAGE_NAME="localhost/codebase-memory-mcp:local"
 # Load .env if present (NPM_REGISTRY, VERSION).
 if [ -f "${REPO_ROOT}/.env" ]; then
     set -a
+    # shellcheck disable=SC1091
     . "${REPO_ROOT}/.env"
     set +a
 fi
@@ -27,7 +28,7 @@ if [ -d "$HOST_ANCHORS" ]; then
 else
     echo "Warning: ${HOST_ANCHORS} not found — building without corporate CAs"
     HOST_ANCHORS=$(mktemp -d)
-    trap "rm -rf $HOST_ANCHORS" EXIT
+    trap 'rm -rf "$HOST_ANCHORS"' EXIT
 fi
 
 # --- Build args ---

@@ -1,9 +1,9 @@
 name: Upstream-Watch
 
-# Polls DeusData/codebase-memory-mcp for new release tags. When a tag
-# appears that we haven't mirrored yet, cut a matching tag + GitHub
-# Release in this repo so consumers can subscribe to *our* releases and
-# know a rebuild against that upstream version is the next step.
+# Polls DeusData/codebase-memory-mcp for a newer release tag than the pin
+# in build.yaml's UPSTREAM_VERSION. If newer, opens a PR that bumps the
+# pin — build.yaml then runs against that PR and smoke-tests the new
+# upstream before you merge.
 #
 # Cron is daily; trigger manually any time via "Run workflow".
 
@@ -13,15 +13,35 @@ on:
   workflow_dispatch: {}
 
 permissions:
-  contents: write   # needed to create tags and releases
+  contents: write
+  pull-requests: write
 
 jobs:
-  mirror:
+  check:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-        with:
-          fetch-depth: 0   # need full tag history to compare
+
+      - name: Verify UPSTREAM_PR_TOKEN is set
+        # Surface a loud warning (not a failure) when the PAT secret is
+        # missing. Without it the auto-PR will open but CI won't run on it,
+        # which is easy to miss in the workflow logs days later.
+        env:
+          UPSTREAM_PR_TOKEN: ${{ secrets.UPSTREAM_PR_TOKEN }}
+        run: |
+          if [ -z "${UPSTREAM_PR_TOKEN}" ]; then
+            echo "::warning::UPSTREAM_PR_TOKEN secret is not set. The bump PR will be opened with GITHUB_TOKEN, which by design does NOT trigger build.yaml on the PR — the smoke test will not gate the merge. To fix, create a fine-grained PAT (Contents r/w, Pull requests r/w on this repo) and add it as a repository secret named UPSTREAM_PR_TOKEN."
+          else
+            echo "UPSTREAM_PR_TOKEN is set; bump PRs will trigger build.yaml normally."
+          fi
+
+      - name: Resolve current pin
+        id: current
+        run: |
+          cur=$(grep -E '^\s*UPSTREAM_VERSION:' .github/workflows/build.yaml \
+                | sed -E 's/.*UPSTREAM_VERSION:\s*//; s/[[:space:]]+$//')
+          echo "version=${cur}" >> "$GITHUB_OUTPUT"
+          echo "Current pin: ${cur}"
 
       - name: Resolve latest upstream tag
         id: latest
@@ -42,40 +62,63 @@ jobs:
           echo "version=${latest}" >> "$GITHUB_OUTPUT"
           echo "Latest upstream tag: ${latest}"
 
-      - name: Check if we already mirrored this tag
-        id: check
+      - name: Decide whether to PR
+        id: decide
         run: |
+          cur="${{ steps.current.outputs.version }}"
           new="${{ steps.latest.outputs.version }}"
-          if git rev-parse -q --verify "refs/tags/${new}" >/dev/null; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-            echo "Tag ${new} already exists in this repo — nothing to do."
-          else
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "Will mirror upstream tag ${new}"
+          if [ "$cur" = "$new" ]; then
+            echo "needs_pr=false" >> "$GITHUB_OUTPUT"
+            echo "Already pinned to latest ($cur) — nothing to do."
+            exit 0
           fi
+          # Refuse to downgrade. semver-sort cur and new; if cur is the
+          # higher one, bail out — upstream may have moved its "latest"
+          # release pointer backwards (rare but possible) and we should
+          # never silently regress.
+          highest=$(printf '%s\n%s\n' "$cur" "$new" | sort -V | tail -1)
+          if [ "$highest" = "$cur" ]; then
+            echo "::warning::Refusing to downgrade: current=$cur newer than discovered=$new" >&2
+            echo "needs_pr=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "needs_pr=true" >> "$GITHUB_OUTPUT"
+          echo "Will bump $cur -> $new"
 
-      - name: Create matching tag and release
-        if: steps.check.outputs.exists == 'false'
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          NEW: ${{ steps.latest.outputs.version }}
+      - name: Bump pin in build.yaml
+        if: steps.decide.outputs.needs_pr == 'true'
         run: |
-          set -euo pipefail
-          # Tag the current master commit. The wrapper image content
-          # (Containerfile, build.sh, install.sh) is upstream-version
-          # agnostic — `./build.sh --build-arg VERSION=${NEW}` produces
-          # the wrapper for that upstream release from any of our tags.
-          git tag -a "${NEW}" -m "Mirror of DeusData/codebase-memory-mcp ${NEW}"
-          git push origin "${NEW}"
+          sed -i "s|UPSTREAM_VERSION: .*|UPSTREAM_VERSION: ${{ steps.latest.outputs.version }}|" \
+            .github/workflows/build.yaml
+          grep UPSTREAM_VERSION .github/workflows/build.yaml
 
-          gh release create "${NEW}" \
-            --title "${NEW} (mirrors upstream ${NEW})" \
-            --notes "Automated mirror of upstream release.
+      - name: Open / update PR
+        if: steps.decide.outputs.needs_pr == 'true'
+        uses: peter-evans/create-pull-request@v7
+        with:
+          # NOTE on the token: the default GITHUB_TOKEN works to OPEN the PR,
+          # but PRs created by GITHUB_TOKEN do NOT trigger downstream
+          # workflows — meaning build.yaml will not run automatically on
+          # this PR, so the smoke test won't gate the bump. To get the
+          # smoke test to run, set a repo secret named UPSTREAM_PR_TOKEN
+          # to a fine-grained PAT with `Contents: read/write` and
+          # `Pull requests: read/write` on this repo, and the action will
+          # use it. If the secret isn't set we fall back to GITHUB_TOKEN
+          # and you'll need to close+reopen the PR (or push a no-op commit)
+          # to kick CI.
+          token: ${{ secrets.UPSTREAM_PR_TOKEN || secrets.GITHUB_TOKEN }}
+          branch: bot/upstream-bump-${{ steps.latest.outputs.version }}
+          base: master
+          delete-branch: true
+          commit-message: "ci: bump upstream codebase-memory-mcp ${{ steps.current.outputs.version }} -> ${{ steps.latest.outputs.version }}"
+          title: "Upstream bump: ${{ steps.current.outputs.version }} -> ${{ steps.latest.outputs.version }}"
+          labels: dependencies, upstream
+          body: |
+            Automated bump of `UPSTREAM_VERSION` in `.github/workflows/build.yaml`.
 
-          Upstream release: https://github.com/DeusData/codebase-memory-mcp/releases/tag/${NEW}
-          Upstream compare: https://github.com/DeusData/codebase-memory-mcp/commits/${NEW}
+            - Old: `${{ steps.current.outputs.version }}`
+            - New: `${{ steps.latest.outputs.version }}`
+            - Upstream release: https://github.com/DeusData/codebase-memory-mcp/releases/tag/${{ steps.latest.outputs.version }}
+            - Compare: https://github.com/DeusData/codebase-memory-mcp/compare/${{ steps.current.outputs.version }}...${{ steps.latest.outputs.version }}
 
-          Build the wrapper image against this upstream version with:
-
-              ./build.sh --build-arg VERSION=${NEW}
-          "
+            CI's smoke test will exercise the new upstream end-to-end (initialize → tools/list → list_projects round-trip through mcp-proxy). Review the diff, glance at the smoke-test logs, and merge if green.

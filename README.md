@@ -174,7 +174,9 @@ Identical flags in `compose.yaml` and `systemd/codebase-memory-mcp.container` (s
 ├── systemd/
 │   └── codebase-memory-mcp.container      # Quadlet unit (templated)
 ├── .github/workflows/
-│   └── upstream-watch.yaml                # daily mirror of upstream releases as tags
+│   ├── build.yaml                         # CI: build + smoke test, publish to ghcr.io on master
+│   └── upstream-watch.yaml                # daily PR bumping UPSTREAM_VERSION pin in build.yaml
+├── .editorconfig
 └── README.md
 ```
 

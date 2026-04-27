@@ -1,0 +1,279 @@
+name: Build
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  workflow_dispatch:
+
+# A single ENV-level pin for the upstream version so it's defined once and
+# referenced by both the smoke-test build and the multi-arch publish build.
+# Bump deliberately; CI is rate-limited if you let "latest" hit the API.
+env:
+  UPSTREAM_VERSION: v1.27.0
+
+jobs:
+  build-test-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v6
+
+      # Hard guard: this image is amd64-only on purpose.
+      # arm64 cross-builds under qemu would add many minutes per release for
+      # an audience that doesn't exist (the workstations this targets are
+      # amd64). qemu is intentionally NOT installed below, so an accidental
+      # arm64 `platforms:` would already fail at buildkit time — this step
+      # turns that into a clearer message and catches it pre-build.
+      - name: Guard — refuse arm64 in workflow
+        run: |
+          if grep -nE '^[[:space:]]+platforms:[[:space:]]+linux/[^#]*arm64' .github/workflows/build.yaml; then
+            echo "::error::This wrapper is amd64-only by design. Remove the arm64 platform reference before merging." >&2
+            exit 1
+          fi
+
+      - uses: docker/setup-buildx-action@v4
+
+      # docker/build-push-action only takes string named contexts, not host
+      # paths. The Containerfile expects a `hostcerts` build context — feed
+      # it an empty dir so the CA-import RUN steps no-op. Real corp builds
+      # use scripts/build.sh on a RHEL host instead.
+      - name: Prepare empty hostcerts context
+        run: mkdir -p /tmp/empty-hostcerts
+
+      - name: Build amd64 (load + cache)
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Containerfile
+          build-contexts: |
+            hostcerts=/tmp/empty-hostcerts
+          build-args: |
+            VERSION=${{ env.UPSTREAM_VERSION }}
+            NPM_REGISTRY=https://registry.npmjs.org/
+          platforms: linux/amd64
+          load: true
+          tags: localhost/codebase-memory-mcp:local
+          cache-from: type=gha,scope=build
+          cache-to: type=gha,scope=build,mode=max
+          provenance: false
+
+      - name: Inspect image
+        run: |
+          docker images localhost/codebase-memory-mcp
+          docker run --rm --entrypoint sh localhost/codebase-memory-mcp:local -c '
+            echo "=== user ==="; id
+            echo "=== binary ==="; codebase-memory-mcp --version || true
+            echo "=== mcp-proxy ==="; mcp-proxy --help | head -5
+            echo "=== ca bundle cert count ==="
+            awk "/-----BEGIN CERTIFICATE-----/{c++} END{print c}" /etc/ssl/certs/ca-certificates.crt
+          '
+
+      - name: Smoke test — start container, MCP initialize, tools/list, tools/call
+        run: |
+          set -euo pipefail
+          docker rm -f cbm-ci 2>/dev/null || true
+
+          # Workspace dir mounted RO at the same path inside the container,
+          # so trace_path / search_graph results would carry host paths if
+          # we triggered any indexing. The smoke test doesn't actually
+          # index — list_projects on an empty cache is enough to prove the
+          # bridge round-trip — but the mount has to be present because some
+          # MCP tools fail-fast if their workspace path is missing.
+          mkdir -p /tmp/cbm-ws
+          docker run -d --name cbm-ci \
+            --cap-drop=ALL \
+            --security-opt=no-new-privileges \
+            -p 127.0.0.1:23149:8000 \
+            -v /tmp/cbm-ws:/tmp/cbm-ws:ro \
+            localhost/codebase-memory-mcp:local
+
+          echo ">> Waiting for mcp-proxy to start"
+          for i in $(seq 1 30); do
+            if curl -fsS -o /dev/null --max-time 1 -X POST http://127.0.0.1:23149/mcp \
+              -H 'Content-Type: application/json' \
+              -H 'Accept: application/json, text/event-stream' \
+              --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}'; then
+              echo ">> Endpoint responding after ${i}s"
+              break
+            fi
+            sleep 1
+          done
+
+          echo ">> initialize"
+          init_resp=$(curl -sNi -X POST http://127.0.0.1:23149/mcp \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"ci","version":"0"}}}' \
+            --max-time 5)
+          echo "$init_resp"
+
+          # ASSERTION 1: response came from the bridged upstream child, not
+          # from mcp-proxy fabricating something. serverInfo.name is set by
+          # the codebase-memory-mcp binary — if mcp-proxy weren't actually
+          # piping JSON-RPC to the spawned child and back, this string would
+          # not appear.
+          if ! printf '%s' "$init_resp" | grep -q '"name":"codebase-memory-mcp"'; then
+            echo "FAIL: initialize did not return upstream serverInfo.name — bridge not forwarding to child" >&2
+            exit 1
+          fi
+          echo ">> bridge confirmed: serverInfo from upstream child"
+
+          # ASSERTION 2: mcp-proxy issued an mcp-session-id (session tracking on).
+          sid=$(printf '%s\n' "$init_resp" | awk 'BEGIN{IGNORECASE=1}/^mcp-session-id:/{print $2}' | tr -d '\r')
+          if [ -z "$sid" ]; then
+            echo "FAIL: no mcp-session-id header in initialize response" >&2
+            exit 1
+          fi
+          echo ">> session: $sid"
+
+          # ASSERTION 3: a real codebase-memory-mcp child exists inside the
+          # container — proof that mcp-proxy spawned the bridged process,
+          # not just that an HTTP endpoint is alive. debian:13-slim has no
+          # `ps`/`pgrep`, so read /proc directly.
+          if ! docker exec cbm-ci sh -c '
+            for d in /proc/[0-9]*; do
+              [ "$(cat "$d/comm" 2>/dev/null)" = "codebase-memory" ] && exit 0
+            done
+            exit 1
+          '; then
+            echo "FAIL: no upstream codebase-memory-mcp child running in container" >&2
+            docker exec cbm-ci sh -c '
+              for d in /proc/[0-9]*; do
+                printf "%s\tcomm=%s\n" "$d" "$(cat "$d/comm" 2>/dev/null)"
+              done
+            ' || true
+            exit 1
+          fi
+          echo ">> bridge confirmed: real codebase-memory-mcp child running"
+
+          curl -sN -X POST http://127.0.0.1:23149/mcp \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -H "mcp-session-id: $sid" \
+            --data '{"jsonrpc":"2.0","method":"notifications/initialized"}' \
+            --max-time 5
+
+          echo ">> tools/list"
+          tools=$(curl -sN -X POST http://127.0.0.1:23149/mcp \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -H "mcp-session-id: $sid" \
+            --data '{"jsonrpc":"2.0","id":2,"method":"tools/list","params":{}}' \
+            --max-time 5)
+          printf '%.2000s\n' "$tools"
+
+          # ASSERTION 4: tools/list returned the expected tool set — only
+          # possible if the child handled the request and the response came
+          # back through the bridge.
+          for t in search_graph index_repository trace_path get_architecture list_projects; do
+            if ! printf '%s' "$tools" | grep -q "\"name\":\"${t}\""; then
+              echo "FAIL: tools/list missing expected tool '${t}'" >&2
+              exit 1
+            fi
+          done
+          echo ">> tools/list contains expected tool set"
+
+          # ASSERTION 5: full round-trip on a real tool call. list_projects
+          # is no-arg and returns an empty list on a fresh cache without
+          # touching any filesystem path. If this returns a JSON-RPC result,
+          # every link in the chain (HTTP → mcp-proxy → stdin → binary →
+          # stdout → mcp-proxy → HTTP) actually carried bytes.
+          echo ">> tools/call list_projects"
+          status=$(curl -sN -X POST http://127.0.0.1:23149/mcp \
+            -H 'Content-Type: application/json' \
+            -H 'Accept: application/json, text/event-stream' \
+            -H "mcp-session-id: $sid" \
+            --data '{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"list_projects","arguments":{}}}' \
+            --max-time 10)
+          printf '%.1500s\n' "$status"
+
+          if ! printf '%s' "$status" | grep -qE '"jsonrpc":"2\.0".*"id":3'; then
+            echo "FAIL: list_projects did not return a JSON-RPC response" >&2
+            exit 1
+          fi
+          if printf '%s' "$status" | grep -q '"error"'; then
+            echo "FAIL: list_projects returned a JSON-RPC error" >&2
+            exit 1
+          fi
+          echo ">> OK — bridge round-trip verified end-to-end"
+
+      - name: Container logs (always)
+        if: always()
+        run: docker logs cbm-ci 2>&1 | tail -100 || true
+
+      - name: Stop container
+        if: always()
+        run: docker rm -f cbm-ci 2>/dev/null || true
+
+      # Publish only on push to master, after smoke test. Same builder +
+      # same cache scope as the amd64 build above, so every layer is a
+      # cache hit — the publish step is essentially just a registry push.
+      #
+      # IMPORTANT: this image is built in CI, which has no corporate root
+      # CAs. It is suitable for non-corporate users and as a known-good
+      # baseline. Enterprises behind a TLS-intercepting proxy MUST still
+      # run ./scripts/build.sh on a host with corp anchors populated.
+      - name: Log in to ghcr.io
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Compute tags
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        id: tags
+        run: |
+          owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
+          image="ghcr.io/${owner}/codebase-memory-mcp"
+          # SemVer-pre-release-style timestamp tag tied to the upstream
+          # version we baked in. Example: v1.27.0-20260427T0830Z.
+          # - Sortable lexicographically.
+          # - Immutable (each build gets its own minute-precision tag).
+          # - SemVer-valid: the date is the pre-release identifier.
+          ts=$(date -u +%Y%m%dT%H%MZ)
+          versioned="${{ env.UPSTREAM_VERSION }}-${ts}"
+
+          # Every released image gets all three:
+          #  :<upstream>-<utc-timestamp>   immutable per-build artifact
+          #  :<upstream>                   moves to latest build of THIS upstream version
+          #  :latest                       moves to latest published build, period
+          tags="${image}:${versioned},${image}:${{ env.UPSTREAM_VERSION }},${image}:latest"
+
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "Will push:"
+          printf '  %s\n' ${tags//,/ }
+
+      - name: Build amd64 and push (reused from cache)
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Containerfile
+          build-contexts: |
+            hostcerts=/tmp/empty-hostcerts
+          build-args: |
+            VERSION=${{ env.UPSTREAM_VERSION }}
+            NPM_REGISTRY=https://registry.npmjs.org/
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          cache-from: type=gha,scope=build
+          cache-to: type=gha,scope=build,mode=max
+          provenance: false
+
+  shellcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - name: Run shellcheck on scripts/
+        run: |
+          sudo apt-get update && sudo apt-get install -y shellcheck
+          shellcheck scripts/*.sh

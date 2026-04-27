@@ -66,7 +66,6 @@ Done. Useful commands:
   journalctl --user -u codebase-memory-mcp.service -f
 
 The streamable-http MCP endpoint is now at http://127.0.0.1:23149/mcp
-(loopback only — front it with a reverse proxy if you need remote access).
 
 Next step: run ./scripts/install-opencode.sh to wire OpenCode to that endpoint.
 EOF

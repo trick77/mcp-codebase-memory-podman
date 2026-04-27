@@ -13,11 +13,12 @@ cd "$(dirname "$0")/.."
 UNIT_SRC="$(pwd)/systemd/codebase-memory-mcp.container"
 UNIT_DEST_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/containers/systemd"
 UNIT_DEST="${UNIT_DEST_DIR}/codebase-memory-mcp.container"
+IMAGE="ghcr.io/trick77/codebase-memory-mcp:latest"
 
-if ! podman image exists localhost/codebase-memory-mcp:local; then
-    echo "ERROR: image localhost/codebase-memory-mcp:local not found. Run ./scripts/build.sh first." >&2
-    exit 1
-fi
+# Pull the image up front so the first `systemctl start` doesn't have to
+# do it (and so an unreachable registry surfaces here, not in journald).
+echo ">> Pulling ${IMAGE}"
+podman pull "$IMAGE"
 
 # --- Ask for the base directory containing repos to index ---
 DEFAULT_BASE_DIR="$HOME/localgit"

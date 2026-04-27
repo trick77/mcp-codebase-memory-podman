@@ -1,8 +1,10 @@
 # mcp-codebase-memory-podman (podman, streamable-http)
 
-Hardened podman wrapper around [`DeusData/codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp). Built for enterprise workstations: corporate CAs baked in at build time, container is `cap_drop: ALL` and `no-new-privileges`, your source tree is mounted read-only, the graph database lives in a named podman volume, and the MCP endpoint is exposed only on `127.0.0.1:23149`.
+Hardened podman wrapper around [`DeusData/codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp). Built for enterprise workstations: container is `cap_drop: ALL` and `no-new-privileges`, your source tree is mounted read-only, the graph database lives in a named podman volume, and the MCP endpoint is exposed only on `127.0.0.1:23149`.
 
 Upstream speaks stdio only; we bundle [`sparfenyuk/mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy) to expose streamable-http so the container can run as a long-lived Quadlet service. Upstream also ships a static binary that needs a newer glibc than RHEL 9 provides — we build from source inside Debian 13 in a multi-stage image so the final runtime contains only the compiled binary, mcp-proxy, and a Python venv.
+
+**Pre-built image**: `ghcr.io/trick77/codebase-memory-mcp:latest` (built from CI on every push to `master`, no corp CAs baked in). Most users should just pull this. Behind a TLS-intercepting proxy, build from source via [Building from source](#building-from-source) instead.
 
 ## Using it (once installed)
 
@@ -36,17 +38,12 @@ What the agent has access to (full list under [What works](#what-works) below): 
 
 - `podman` ≥ 4.4 (RHEL 9.3+ is fine)
 - `podman-compose` ≥ 1.0.6 (only if you want to run via compose; Quadlet doesn't need it)
-- A build host with corporate root CA(s) in `/etc/pki/ca-trust/source/anchors/`
-  (override with `HOST_ANCHORS=/path/to/anchors`; the dir may be empty on a
-  non-corporate host).
 - Source repos to index, all under one base directory (default: `~/localgit`).
 
 ## First-time setup
 
 ```sh
-cp .env.example .env
-$EDITOR .env                        # optionally pin VERSION or set NPM_REGISTRY
-./scripts/build.sh
+podman pull ghcr.io/trick77/codebase-memory-mcp:latest
 podman-compose up -d                # start the service (or use Quadlet, below)
 ./scripts/install-opencode.sh       # writes the OpenCode MCP entry
 ```
@@ -86,14 +83,26 @@ The graph database is persisted in the named volume `codebase-memory-mcp-cache` 
 
 ## Updates
 
+The Quadlet unit has `AutoUpdate=registry`, so:
+
 ```sh
-./scripts/update.sh v0.4.11                 # any tag from DeusData/codebase-memory-mcp releases
-podman-compose up -d --force-recreate       # pick up the new image
-# or, if running via Quadlet:
-# systemctl --user restart codebase-memory-mcp.service
+podman auto-update                                 # pulls newer ghcr.io/.../codebase-memory-mcp:latest, restarts service
+# or pin manually:
+podman pull ghcr.io/trick77/codebase-memory-mcp:v1.27.0
+sed -i 's|:latest|:v1.27.0|' ~/.config/containers/systemd/codebase-memory-mcp.container
+systemctl --user daemon-reload
+systemctl --user restart codebase-memory-mcp.service
 ```
 
-`update.sh` writes `VERSION=v0.4.11` into `.env`, rebuilds the image with fresh corporate CAs, and prunes dangling layers. `podman auto-update` is **intentionally not used** — the image is built on a controlled host, never pulled at runtime.
+CI publishes three tags per build:
+
+- `:<upstream>-<utc-timestamp>` — immutable per-build artifact (e.g. `:v1.27.0-20260427T0830Z`)
+- `:<upstream>` — rolling, latest build of that upstream version (e.g. `:v1.27.0`)
+- `:latest` — rolling, latest build of any upstream version
+
+The [`upstream-watch`](.github/workflows/upstream-watch.yaml) workflow polls upstream daily and opens a PR bumping `UPSTREAM_VERSION` in [`build.yaml`](.github/workflows/build.yaml). The CI smoke test runs against the new upstream on the PR — merging publishes the new image.
+
+If you built from source, use `./scripts/update.sh <tag>` instead — see [Building from source](#building-from-source).
 
 ## What works
 
@@ -136,18 +145,20 @@ If you ever need cross-host access, do not change the bind to `0.0.0.0` — fron
 ## Verification
 
 ```sh
-# 1. Image built with corp CAs (count certs in the runtime bundle).
-podman run --rm --entrypoint sh localhost/codebase-memory-mcp:local -c \
-  'awk "/-----BEGIN CERTIFICATE-----/{c++} END{print c\" certs in bundle\"}" /etc/ssl/certs/ca-certificates.crt'
-
-# 2. Service is up.
+# 1. Service is up.
 systemctl --user is-active codebase-memory-mcp.service
 
-# 3. Tool list comes back over HTTP.
+# 2. Initialize round-trips through mcp-proxy to the upstream binary.
 curl -sN -X POST http://127.0.0.1:23149/mcp \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json, text/event-stream' \
-  --data '{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{}}' | head
+  --data '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"smoke","version":"0"}}}'
+# expect serverInfo.name == "codebase-memory-mcp"
+
+# 3. Cert count in the runtime bundle (only meaningful for source builds
+#    behind a corp proxy — the CI image has just the public bundle).
+podman run --rm --entrypoint sh ghcr.io/trick77/codebase-memory-mcp:latest -c \
+  'awk "/-----BEGIN CERTIFICATE-----/{c++} END{print c\" certs in bundle\"}" /etc/ssl/certs/ca-certificates.crt'
 ```
 
 ## Hardening
@@ -186,7 +197,35 @@ Identical flags in `compose.yaml` and `systemd/codebase-memory-mcp.container` (s
 systemctl --user disable --now codebase-memory-mcp.service
 rm ~/.config/containers/systemd/codebase-memory-mcp.container
 systemctl --user daemon-reload
-podman rmi localhost/codebase-memory-mcp:local
+podman rmi ghcr.io/trick77/codebase-memory-mcp:latest
 podman volume rm codebase-memory-mcp-cache
 # Remove "codebase-memory-mcp" from .mcp in ~/.config/opencode/opencode.json
+```
+
+## Building from source
+
+If you're behind a TLS-intercepting proxy, or want to pin a specific upstream version with corporate CAs baked in, build the image yourself:
+
+```sh
+cp .env.example .env
+$EDITOR .env                        # optionally pin VERSION or set NPM_REGISTRY
+./scripts/build.sh                  # tags as localhost/codebase-memory-mcp:local
+```
+
+`scripts/build.sh` mounts `/etc/pki/ca-trust/source/anchors/` into the build (override with `HOST_ANCHORS=/path/to/anchors`; the dir may be empty on a non-corporate host). Both the builder and runtime stages import these anchors so `git clone`, `npm`, and `mcp-proxy` (Python) all trust your corp CA.
+
+Then point compose / Quadlet at the local image:
+
+```sh
+# compose.yaml: change `image:` to localhost/codebase-memory-mcp:local
+# Quadlet: change `Image=` to localhost/codebase-memory-mcp:local
+#          and remove the `AutoUpdate=registry` line
+```
+
+Bump to a new upstream version (rebuild from source):
+
+```sh
+./scripts/update.sh v1.27.1                 # writes VERSION to .env, rebuilds, prunes
+podman-compose up -d --force-recreate
+# or: systemctl --user restart codebase-memory-mcp.service
 ```

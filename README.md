@@ -39,7 +39,7 @@ journalctl --user -u codebase-memory-mcp.service -f
 
 Use **either** podman-compose **or** the Quadlet — not both at once on the same machine, they'd collide on the container name and the published port.
 
-## How it works (1-minute version)
+## How it works
 
 1. Quadlet boots `localhost/codebase-memory-mcp:local` and publishes `127.0.0.1:23149:8000`.
 2. Inside the container, `mcp-proxy` listens on `:8000`.
@@ -82,7 +82,7 @@ If you built from source, use `./scripts/update.sh <tag>` instead — see [Build
 - `manage_adr`, `ingest_traces`
 - `list_projects`, `delete_project`
 
-## What does NOT work (by design)
+## What does NOT work
 
 - **No write access to your repos.** The base directory is mounted read-only, so the binary cannot modify, stage, or commit anything.
 - **No host bind mounts beyond the source tree.** SSH keys, dotfiles, and other on-disk credentials are not reachable from inside the container.

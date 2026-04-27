@@ -49,8 +49,10 @@ echo ">> Installed $UNIT_DEST"
 # 3. Reload user systemd so Quadlet generates the .service unit.
 systemctl --user daemon-reload
 
-# 4. Enable + start.
-systemctl --user enable --now codebase-memory-mcp.service
+# 4. Start the service. Quadlet-generated units are transient — they can't
+# be `enable`d via systemctl. The `[Install] WantedBy=default.target` line
+# in the .container file handles boot-time wiring at daemon-reload time.
+systemctl --user start codebase-memory-mcp.service
 
 echo ">> Status:"
 systemctl --user --no-pager status codebase-memory-mcp.service || true

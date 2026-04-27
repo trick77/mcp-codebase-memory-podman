@@ -8,4 +8,8 @@ set -eu
 [ -n "${AUTO_INDEX:-}" ]       && codebase-memory-mcp config set auto_index       "$AUTO_INDEX"
 [ -n "${AUTO_INDEX_LIMIT:-}" ] && codebase-memory-mcp config set auto_index_limit "$AUTO_INDEX_LIMIT"
 
+echo "--- effective config ---"
+codebase-memory-mcp config list
+echo "------------------------"
+
 exec mcp-proxy --host 0.0.0.0 --port 8000 --pass-environment -- codebase-memory-mcp

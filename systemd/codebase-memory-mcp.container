@@ -18,10 +18,6 @@ ContainerName=codebase-memory-mcp
 Image=ghcr.io/trick77/mcp-codebase-memory-podman:latest
 AutoUpdate=registry
 PublishPort=127.0.0.1:23149:8000
-# Forward container stdout/stderr to the user journal so journalctl --user
-# -u codebase-memory-mcp.service shows mcp-proxy and binary output, not
-# just systemd unit events. Default rootless log driver is k8s-file.
-LogDriver=journald
 
 # Auto-index every project the MCP server sees on first contact.
 # Applied by entrypoint.sh on each start; persisted in the cache volume.

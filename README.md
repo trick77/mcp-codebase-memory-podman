@@ -13,10 +13,11 @@ Upstream is stdio-only and ships a glibc-too-new static binary. We build from so
 ## Setup
 
 ```sh
-podman pull ghcr.io/trick77/mcp-codebase-memory-podman:latest
 podman-compose up -d
 ./scripts/install-opencode.sh
 ```
+
+Compose has `pull_policy: always`, so `up` pulls the latest image.
 
 Boot-time auto-start via rootless Quadlet:
 
@@ -63,17 +64,14 @@ CI publishes per build:
 
 - Source tree is RO. Indexing is read-only.
 - No host bind mounts beyond the source tree.
-- Graph UI is not exposed in service mode — the binary's `--ui=true` binds 9749 per-process and mcp-proxy spawns one child per session, so multiple sessions would collide. For ad-hoc UI:
+- Graph UI is not exposed in service mode — the binary's `--ui=true` binds 9749 per-process and mcp-proxy spawns one child per session, so multiple sessions would collide. Use the `ui` compose profile for ad-hoc exploration:
 
   ```sh
-  podman run --rm -it -p 127.0.0.1:9749:9749 \
-      -v $HOME/localgit:$HOME/localgit:ro \
-      -v codebase-memory-mcp-cache:/root/.cache/codebase-memory-mcp \
-      --entrypoint codebase-memory-mcp \
-      ghcr.io/trick77/mcp-codebase-memory-podman:latest --ui=true
+  podman-compose stop codebase-memory-mcp
+  podman-compose --profile ui run --rm --service-ports codebase-memory-mcp-ui
   ```
 
-  Stop the service first — graph DB doesn't tolerate concurrent writers on the same volume.
+  Stop the main service first — graph DB doesn't tolerate concurrent writers on the same volume.
 
 ## Network
 

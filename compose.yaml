@@ -1,28 +1,39 @@
+x-base: &base
+  image: ghcr.io/trick77/mcp-codebase-memory-podman:latest
+  pull_policy: always
+  volumes:
+    # Source tree mounted RO at the same path so graph results carry host
+    # paths. Override via BASE_DIR.
+    - "${BASE_DIR:-${HOME}/localgit}:${BASE_DIR:-${HOME}/localgit}:ro,Z"
+    - "codebase-memory-mcp-cache:/root/.cache/codebase-memory-mcp:Z"
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  pids_limit: 128
+  mem_limit: 2g
+  memswap_limit: 2g
+  cpus: 2.0
+
 services:
   codebase-memory-mcp:
-    # Pulled from GitHub Container Registry. Override with a pinned tag
-    # (e.g. :v0.6.0) or with localhost/codebase-memory-mcp:local if you
-    # built from source via ./scripts/build.sh.
-    image: ghcr.io/trick77/mcp-codebase-memory-podman:latest
-    pull_policy: always
+    <<: *base
     container_name: codebase-memory-mcp
     restart: unless-stopped
     ports:
       - "127.0.0.1:23149:8000"
-    volumes:
-      # Source tree: read-only at the same path so file paths in graph results
-      # match host paths. Override BASE_DIR in your shell or .env.
-      - "${BASE_DIR:-${HOME}/localgit}:${BASE_DIR:-${HOME}/localgit}:ro,Z"
-      # Persistent graph database.
-      - "codebase-memory-mcp-cache:/root/.cache/codebase-memory-mcp:Z"
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    pids_limit: 128
-    mem_limit: 2g
-    memswap_limit: 2g
-    cpus: 2.0
+
+  # Ad-hoc graph UI service. Runs the binary with --ui=true on 9749.
+  # Stop the main service first — graph DB doesn't tolerate concurrent writers.
+  #   podman-compose --profile ui run --rm --service-ports codebase-memory-mcp-ui
+  codebase-memory-mcp-ui:
+    <<: *base
+    container_name: codebase-memory-mcp-ui
+    profiles: [ui]
+    entrypoint: ["codebase-memory-mcp"]
+    command: ["--ui=true"]
+    ports:
+      - "127.0.0.1:9749:9749"
 
 volumes:
   codebase-memory-mcp-cache:

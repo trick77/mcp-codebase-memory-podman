@@ -1,0 +1,42 @@
+# Quadlet unit for rootless podman. Install with `scripts/install-systemd.sh`,
+# which substitutes __BASE_DIR__ with the absolute path to the directory
+# containing your git repos.
+#
+# Quadlet generates a systemd .service unit at daemon-reload time. Manage it
+# via `systemctl --user <start|stop|status|restart> codebase-memory-mcp.service`.
+
+[Unit]
+Description=codebase-memory-mcp (code knowledge graph via mcp-proxy bridge)
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=codebase-memory-mcp
+Image=localhost/codebase-memory-mcp:local
+PublishPort=127.0.0.1:23149:8000
+
+# Source tree: read-only at the same path so file paths in graph results match
+# host paths. Indexing only reads, never writes.
+Volume=__BASE_DIR__:__BASE_DIR__:ro,Z
+
+# Persistent graph database. Survives container restarts and image rebuilds.
+Volume=codebase-memory-mcp-cache:/root/.cache/codebase-memory-mcp:Z
+
+NoNewPrivileges=true
+DropCapability=ALL
+# Resource ceilings for the whole container (mcp-proxy + all spawned binary
+# children combined). Tune if you hit OOM kills or "fork failed" in journald.
+PidsLimit=128
+
+[Service]
+Restart=always
+RestartSec=5
+# Hard caps. Quadlet passes [Service] through to systemd directly. Indexing
+# is memory-hungry on large monorepos — bump these if you index something big.
+MemoryMax=2G
+MemorySwapMax=0
+CPUQuota=200%
+TasksMax=256
+
+[Install]
+WantedBy=default.target

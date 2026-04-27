@@ -1,0 +1,81 @@
+name: Upstream-Watch
+
+# Polls DeusData/codebase-memory-mcp for new release tags. When a tag
+# appears that we haven't mirrored yet, cut a matching tag + GitHub
+# Release in this repo so consumers can subscribe to *our* releases and
+# know a rebuild against that upstream version is the next step.
+#
+# Cron is daily; trigger manually any time via "Run workflow".
+
+on:
+  schedule:
+    - cron: "23 6 * * *"   # daily at 06:23 UTC (~07:23–08:23 Europe/Zurich)
+  workflow_dispatch: {}
+
+permissions:
+  contents: write   # needed to create tags and releases
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0   # need full tag history to compare
+
+      - name: Resolve latest upstream tag
+        id: latest
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Use the GIT TAG list, not the Releases API — upstream may cut
+          # tags without always creating a Release object. Tags are the
+          # authoritative source of versioned code. Pick the highest by
+          # semver, restricted to vN.N.N form.
+          latest=$(gh api --paginate /repos/DeusData/codebase-memory-mcp/tags --jq '.[].name' \
+                   | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+                   | sort -V | tail -1)
+          if [ -z "$latest" ]; then
+            echo "::error::No semver tags found on DeusData/codebase-memory-mcp" >&2
+            exit 1
+          fi
+          echo "version=${latest}" >> "$GITHUB_OUTPUT"
+          echo "Latest upstream tag: ${latest}"
+
+      - name: Check if we already mirrored this tag
+        id: check
+        run: |
+          new="${{ steps.latest.outputs.version }}"
+          if git rev-parse -q --verify "refs/tags/${new}" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${new} already exists in this repo — nothing to do."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "Will mirror upstream tag ${new}"
+          fi
+
+      - name: Create matching tag and release
+        if: steps.check.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          NEW: ${{ steps.latest.outputs.version }}
+        run: |
+          set -euo pipefail
+          # Tag the current master commit. The wrapper image content
+          # (Containerfile, build.sh, install.sh) is upstream-version
+          # agnostic — `./build.sh --build-arg VERSION=${NEW}` produces
+          # the wrapper for that upstream release from any of our tags.
+          git tag -a "${NEW}" -m "Mirror of DeusData/codebase-memory-mcp ${NEW}"
+          git push origin "${NEW}"
+
+          gh release create "${NEW}" \
+            --title "${NEW} (mirrors upstream ${NEW})" \
+            --notes "Automated mirror of upstream release.
+
+          Upstream release: https://github.com/DeusData/codebase-memory-mcp/releases/tag/${NEW}
+          Upstream compare: https://github.com/DeusData/codebase-memory-mcp/commits/${NEW}
+
+          Build the wrapper image against this upstream version with:
+
+              ./build.sh --build-arg VERSION=${NEW}
+          "

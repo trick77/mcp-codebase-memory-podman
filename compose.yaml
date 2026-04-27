@@ -1,0 +1,24 @@
+services:
+  codebase-memory-mcp:
+    image: localhost/codebase-memory-mcp:local
+    container_name: codebase-memory-mcp
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:23149:8000"
+    volumes:
+      # Source tree: read-only at the same path so file paths in graph results
+      # match host paths. Override BASE_DIR in your shell or .env.
+      - "${BASE_DIR:-${HOME}/localgit}:${BASE_DIR:-${HOME}/localgit}:ro,Z"
+      # Persistent graph database.
+      - "codebase-memory-mcp-cache:/root/.cache/codebase-memory-mcp:Z"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    pids_limit: 128
+    mem_limit: 2g
+    memswap_limit: 2g
+    cpus: 2.0
+
+volumes:
+  codebase-memory-mcp-cache:

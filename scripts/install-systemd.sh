@@ -13,7 +13,7 @@ cd "$(dirname "$0")/.."
 UNIT_SRC="$(pwd)/systemd/codebase-memory-mcp.container"
 UNIT_DEST_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/containers/systemd"
 UNIT_DEST="${UNIT_DEST_DIR}/codebase-memory-mcp.container"
-IMAGE="ghcr.io/trick77/codebase-memory-mcp:latest"
+IMAGE="ghcr.io/trick77/mcp-codebase-memory-podman:latest"
 
 # Pull the image up front so the first `systemctl start` doesn't have to
 # do it (and so an unreachable registry surfaces here, not in journald).

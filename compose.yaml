@@ -1,9 +1,9 @@
 services:
   codebase-memory-mcp:
     # Pulled from GitHub Container Registry. Override with a pinned tag
-    # (e.g. :v1.27.0) or with localhost/codebase-memory-mcp:local if you
+    # (e.g. :v0.6.0) or with localhost/codebase-memory-mcp:local if you
     # built from source via ./scripts/build.sh.
-    image: ghcr.io/trick77/codebase-memory-mcp:latest
+    image: ghcr.io/trick77/mcp-codebase-memory-podman:latest
     pull_policy: always
     container_name: codebase-memory-mcp
     restart: unless-stopped

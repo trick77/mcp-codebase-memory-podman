@@ -1,10 +1,10 @@
-# mcp-codebase-memory-podman (podman, streamable-http)
+# mcp-codebase-memory-podman
 
 Hardened podman wrapper around [`DeusData/codebase-memory-mcp`](https://github.com/DeusData/codebase-memory-mcp). Built for enterprise workstations: container is `cap_drop: ALL` and `no-new-privileges`, your source tree is mounted read-only, the graph database lives in a named podman volume, and the MCP endpoint is exposed only on `127.0.0.1:23149`.
 
 Upstream speaks stdio only; we bundle [`sparfenyuk/mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy) to expose streamable-http so the container can run as a long-lived Quadlet service. Upstream also ships a static binary that needs a newer glibc than RHEL 9 provides — we build from source inside Debian 13 in a multi-stage image so the final runtime contains only the compiled binary, mcp-proxy, and a Python venv.
 
-**Pre-built image**: `ghcr.io/trick77/codebase-memory-mcp:latest` (built from CI on every push to `master`, no corp CAs baked in). Most users should just pull this. Behind a TLS-intercepting proxy, build from source via [Building from source](#building-from-source) instead.
+**Pre-built image**: `ghcr.io/trick77/mcp-codebase-memory-podman:latest` (built from CI on every push to `master`, no corp CAs baked in). Most users should just pull this. Behind a TLS-intercepting proxy, build from source via [Building from source](#building-from-source) instead.
 
 ## Using it (once installed)
 
@@ -43,7 +43,7 @@ What the agent has access to (full list under [What works](#what-works) below): 
 ## First-time setup
 
 ```sh
-podman pull ghcr.io/trick77/codebase-memory-mcp:latest
+podman pull ghcr.io/trick77/mcp-codebase-memory-podman:latest
 podman-compose up -d                # start the service (or use Quadlet, below)
 ./scripts/install-opencode.sh       # writes the OpenCode MCP entry
 ```
@@ -86,9 +86,9 @@ The graph database is persisted in the named volume `codebase-memory-mcp-cache` 
 The Quadlet unit has `AutoUpdate=registry`, so:
 
 ```sh
-podman auto-update                                 # pulls newer ghcr.io/.../codebase-memory-mcp:latest, restarts service
+podman auto-update                                 # pulls newer ghcr.io/trick77/mcp-codebase-memory-podman:latest, restarts service
 # or pin manually:
-podman pull ghcr.io/trick77/codebase-memory-mcp:v0.6.0
+podman pull ghcr.io/trick77/mcp-codebase-memory-podman:v0.6.0
 sed -i 's|:latest|:v0.6.0|' ~/.config/containers/systemd/codebase-memory-mcp.container
 systemctl --user daemon-reload
 systemctl --user restart codebase-memory-mcp.service
@@ -157,7 +157,7 @@ curl -sN -X POST http://127.0.0.1:23149/mcp \
 
 # 3. Cert count in the runtime bundle (only meaningful for source builds
 #    behind a corp proxy — the CI image has just the public bundle).
-podman run --rm --entrypoint sh ghcr.io/trick77/codebase-memory-mcp:latest -c \
+podman run --rm --entrypoint sh ghcr.io/trick77/mcp-codebase-memory-podman:latest -c \
   'awk "/-----BEGIN CERTIFICATE-----/{c++} END{print c\" certs in bundle\"}" /etc/ssl/certs/ca-certificates.crt'
 ```
 
@@ -197,7 +197,7 @@ Identical flags in `compose.yaml` and `systemd/codebase-memory-mcp.container` (s
 systemctl --user disable --now codebase-memory-mcp.service
 rm ~/.config/containers/systemd/codebase-memory-mcp.container
 systemctl --user daemon-reload
-podman rmi ghcr.io/trick77/codebase-memory-mcp:latest
+podman rmi ghcr.io/trick77/mcp-codebase-memory-podman:latest
 podman volume rm codebase-memory-mcp-cache
 # Remove "codebase-memory-mcp" from .mcp in ~/.config/opencode/opencode.json
 ```

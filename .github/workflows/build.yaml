@@ -232,7 +232,7 @@ jobs:
         id: tags
         run: |
           owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
-          image="ghcr.io/${owner}/codebase-memory-mcp"
+          image="ghcr.io/${owner}/mcp-codebase-memory-podman"
           # SemVer-pre-release-style timestamp tag tied to the upstream
           # version we baked in. Example: v0.6.0-20260427T0830Z.
           # - Sortable lexicographically.

@@ -15,7 +15,7 @@ ContainerName=codebase-memory-mcp
 # Pulled from GitHub Container Registry on first start. To run a locally
 # built image instead, change to localhost/codebase-memory-mcp:local and
 # remove the AutoUpdate line below.
-Image=ghcr.io/trick77/codebase-memory-mcp:latest
+Image=ghcr.io/trick77/mcp-codebase-memory-podman:latest
 AutoUpdate=registry
 PublishPort=127.0.0.1:23149:8000
 

@@ -4,34 +4,6 @@ Hardened podman wrapper around [`DeusData/codebase-memory-mcp`](https://github.c
 
 Upstream speaks stdio only; we bundle [`sparfenyuk/mcp-proxy`](https://github.com/sparfenyuk/mcp-proxy) to expose streamable-http so the container can run as a long-lived Quadlet service. Upstream also ships a static binary that needs a newer glibc than RHEL 9 provides — we build from source inside Debian 13 in a multi-stage image so the final runtime contains only the compiled binary, mcp-proxy, and a Python venv.
 
-## Using it (once installed)
-
-You don't call any tool by name — OpenCode (or any MCP client) auto-discovers them on connect via `tools/list` and routes the agent there when your prompt asks about code structure, dependencies, or call chains. Concretely: just describe what you want to know about the codebase.
-
-Useful prompt shape:
-
-1. **What to look at** — a specific function, class, file, or "this project".
-2. **What kind of question** — architecture, callers/callees, dead code, complexity, refactor candidates.
-3. **What to do with it** — explain, list, generate a diagram, suggest changes.
-
-Examples that route to the right tools:
-
-```
-Index this project and show me the architecture.
-```
-
-```
-What functions call ProcessOrder, and what does ProcessOrder
-itself depend on? Trace two levels deep.
-```
-
-```
-Find dead code and the most complex functions in this repo.
-List refactor candidates with reasons.
-```
-
-What the agent has access to (full list under [What works](#what-works) below): repository indexing, graph queries (Cypher), code search, call-path tracing, architecture summaries, dead-code / complexity analysis, ADR management, OpenTelemetry trace ingestion.
-
 ## Prerequisites
 
 - `podman` ≥ 4.4 (RHEL 9.3+ is fine)

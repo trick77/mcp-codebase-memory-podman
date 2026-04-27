@@ -11,7 +11,7 @@ on:
 # referenced by both the smoke-test build and the multi-arch publish build.
 # Bump deliberately; CI is rate-limited if you let "latest" hit the API.
 env:
-  UPSTREAM_VERSION: v1.27.0
+  UPSTREAM_VERSION: v0.6.0
 
 jobs:
   build-test-publish:
@@ -234,7 +234,7 @@ jobs:
           owner=$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')
           image="ghcr.io/${owner}/codebase-memory-mcp"
           # SemVer-pre-release-style timestamp tag tied to the upstream
-          # version we baked in. Example: v1.27.0-20260427T0830Z.
+          # version we baked in. Example: v0.6.0-20260427T0830Z.
           # - Sortable lexicographically.
           # - Immutable (each build gets its own minute-precision tag).
           # - SemVer-valid: the date is the pre-release identifier.

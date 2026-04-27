@@ -88,16 +88,16 @@ The Quadlet unit has `AutoUpdate=registry`, so:
 ```sh
 podman auto-update                                 # pulls newer ghcr.io/.../codebase-memory-mcp:latest, restarts service
 # or pin manually:
-podman pull ghcr.io/trick77/codebase-memory-mcp:v1.27.0
-sed -i 's|:latest|:v1.27.0|' ~/.config/containers/systemd/codebase-memory-mcp.container
+podman pull ghcr.io/trick77/codebase-memory-mcp:v0.6.0
+sed -i 's|:latest|:v0.6.0|' ~/.config/containers/systemd/codebase-memory-mcp.container
 systemctl --user daemon-reload
 systemctl --user restart codebase-memory-mcp.service
 ```
 
 CI publishes three tags per build:
 
-- `:<upstream>-<utc-timestamp>` — immutable per-build artifact (e.g. `:v1.27.0-20260427T0830Z`)
-- `:<upstream>` — rolling, latest build of that upstream version (e.g. `:v1.27.0`)
+- `:<upstream>-<utc-timestamp>` — immutable per-build artifact (e.g. `:v0.6.0-20260427T0830Z`)
+- `:<upstream>` — rolling, latest build of that upstream version (e.g. `:v0.6.0`)
 - `:latest` — rolling, latest build of any upstream version
 
 The [`upstream-watch`](.github/workflows/upstream-watch.yaml) workflow polls upstream daily and opens a PR bumping `UPSTREAM_VERSION` in [`build.yaml`](.github/workflows/build.yaml). The CI smoke test runs against the new upstream on the PR — merging publishes the new image.
@@ -225,7 +225,7 @@ Then point compose / Quadlet at the local image:
 Bump to a new upstream version (rebuild from source):
 
 ```sh
-./scripts/update.sh v1.27.1                 # writes VERSION to .env, rebuilds, prunes
+./scripts/update.sh v0.6.1                 # writes VERSION to .env, rebuilds, prunes
 podman-compose up -d --force-recreate
 # or: systemctl --user restart codebase-memory-mcp.service
 ```

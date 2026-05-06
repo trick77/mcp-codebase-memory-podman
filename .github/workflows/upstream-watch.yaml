@@ -1,8 +1,8 @@
 name: Upstream-Watch
 
 # Polls DeusData/codebase-memory-mcp for a newer release tag than the pin
-# in build.yaml's UPSTREAM_VERSION. If newer, opens a PR that bumps the
-# pin — build.yaml then runs against that PR and smoke-tests the new
+# in .upstream-version. If newer, opens a PR that bumps the pin —
+# build.yaml then runs against that PR and smoke-tests the new
 # upstream before you merge.
 #
 # Cron is daily; trigger manually any time via "Run workflow".
@@ -38,8 +38,7 @@ jobs:
       - name: Resolve current pin
         id: current
         run: |
-          cur=$(grep -E '^\s*UPSTREAM_VERSION:' .github/workflows/build.yaml \
-                | sed -E 's/.*UPSTREAM_VERSION:\s*//; s/[[:space:]]+$//')
+          cur=$(cat .upstream-version)
           echo "version=${cur}" >> "$GITHUB_OUTPUT"
           echo "Current pin: ${cur}"
 
@@ -85,12 +84,11 @@ jobs:
           echo "needs_pr=true" >> "$GITHUB_OUTPUT"
           echo "Will bump $cur -> $new"
 
-      - name: Bump pin in build.yaml
+      - name: Bump pin
         if: steps.decide.outputs.needs_pr == 'true'
         run: |
-          sed -i "s|UPSTREAM_VERSION: .*|UPSTREAM_VERSION: ${{ steps.latest.outputs.version }}|" \
-            .github/workflows/build.yaml
-          grep UPSTREAM_VERSION .github/workflows/build.yaml
+          echo "${{ steps.latest.outputs.version }}" > .upstream-version
+          cat .upstream-version
 
       - name: Open / update PR
         if: steps.decide.outputs.needs_pr == 'true'
@@ -114,7 +112,7 @@ jobs:
           title: "Upstream bump: ${{ steps.current.outputs.version }} -> ${{ steps.latest.outputs.version }}"
           labels: dependencies, upstream
           body: |
-            Automated bump of `UPSTREAM_VERSION` in `.github/workflows/build.yaml`.
+            Automated bump of `.upstream-version`.
 
             - Old: `${{ steps.current.outputs.version }}`
             - New: `${{ steps.latest.outputs.version }}`

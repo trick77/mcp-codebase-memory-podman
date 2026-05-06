@@ -7,12 +7,8 @@ on:
     branches: [master]
   workflow_dispatch:
 
-# A single ENV-level pin for the upstream version so it's defined once and
-# referenced by both the smoke-test build and the multi-arch publish build.
-# Bump deliberately; CI is rate-limited if you let "latest" hit the API.
-env:
-  UPSTREAM_VERSION: v0.6.0
-
+# UPSTREAM_VERSION is pinned in .upstream-version and loaded into GITHUB_ENV
+# by the "Read upstream version pin" step in each job.
 jobs:
   build-test-publish:
     runs-on: ubuntu-latest
@@ -23,6 +19,9 @@ jobs:
 
     steps:
       - uses: actions/checkout@v6
+
+      - name: Read upstream version pin
+        run: echo "UPSTREAM_VERSION=$(cat .upstream-version)" >> "$GITHUB_ENV"
 
       # Hard guard: this image is amd64-only on purpose.
       # arm64 cross-builds under qemu would add many minutes per release for

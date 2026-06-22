@@ -20,7 +20,7 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Verify UPSTREAM_PR_TOKEN is set
         # Surface a loud warning (not a failure) when the PAT secret is
